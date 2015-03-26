@@ -17,9 +17,60 @@
 extern crate libc;
 extern crate num;
 
+use std::default::Default;
 use std::fmt::Display;
 use std::io::Result;
 use num::traits::{Num, Float};
+
+/// Describes locale conventions.
+///
+/// `Locale` is a container for facets that describe how individual locale-dependent operations
+/// should be done.
+pub struct Locale {
+    numeric: Box<Numeric>,
+    time: Box<Time>,
+}
+
+impl Locale {
+    /// Construct specific locale
+    ///
+    /// How the locale should be constructed is specified by instance of `LocaleFactory`. The
+    /// default user locale can be obtained by `default()`.
+    pub fn new(factory: &LocaleFactory) -> Locale {
+        Locale {
+            numeric: if let Some(n) = factory.get_numeric() {
+                n
+            } else {
+                Box::new(Numeric::default())
+            },
+            time: if let Some(t) = factory.get_time() {
+                t
+            } else {
+                Box::new(Time::default())
+            },
+        }
+    }
+
+    /// Return numeric facet.
+    pub fn numeric(&self) -> &Numeric {
+        &*self.numeric
+    }
+
+    /// Return time facet.
+    pub fn time(&self) -> &Time {
+        &*self.time
+    }
+}
+
+impl Default for Locale {
+    fn default() -> Self {
+        if let Ok(f) = SystemLocaleFactory::new("") {
+            Locale::new(&f)
+        } else {
+            Locale::new(&InvariantLocaleFactory)
+        }
+    }
+}
 
 /// Trait defining how to obtain various components of a locale.
 ///
@@ -126,9 +177,8 @@ pub use InvariantLocaleFactory as SystemLocaleFactory;
 ///
 /// The returned locale factory provides locale facets implemented using standard localization
 /// functionality of the underlying operating system and configured for user's default locale.
-//
-// FIXME: The global instance should simply default-initialize to default user locale with proper
-// fallback if it fails to construct and then we don't need this.
+///
+/// **Deprecated:** Use SystemLocaleFactory::default() or better yet simply Locale::default().
 pub fn user_locale_factory() -> SystemLocaleFactory {
     // FIXME: Error handling? Constructing locale with "" should never fail as far as I can tell.
     SystemLocaleFactory::new("").unwrap()
@@ -190,6 +240,12 @@ impl Numeric {
     }
 }
 
+impl Default for Numeric {
+    fn default() -> Self {
+        Numeric::new(".", "")
+    }
+}
+
 // ---- time stuff ---
 
 #[derive(Debug, Clone)]
@@ -211,6 +267,29 @@ impl Time {
     }
 
     pub fn english() -> Time {
+        Time::default()
+    }
+
+    pub fn long_month_name(&self, months_from_january: usize) -> String {
+        self.long_month_names[months_from_january].clone()
+    }
+
+    pub fn short_month_name(&self, months_from_january: usize) -> String {
+        self.month_names[months_from_january].clone()
+    }
+
+    pub fn long_day_name(&self, days_from_sunday: usize) -> String {
+        self.day_names[days_from_sunday].clone()
+    }
+
+    pub fn short_day_name(&self, days_from_sunday: usize) -> String {
+        self.day_names[days_from_sunday].clone()
+    }
+
+}
+
+impl Default for Time {
+    fn default() -> Self {
         Time {
             month_names: vec![
                 "Jan".to_string(),  "Feb".to_string(),  "Mar".to_string(),
@@ -238,23 +317,6 @@ impl Time {
             ],
         }
     }
-
-    pub fn long_month_name(&self, months_from_january: usize) -> String {
-        self.long_month_names[months_from_january].clone()
-    }
-
-    pub fn short_month_name(&self, months_from_january: usize) -> String {
-        self.month_names[months_from_january].clone()
-    }
-
-    pub fn long_day_name(&self, days_from_sunday: usize) -> String {
-        self.day_names[days_from_sunday].clone()
-    }
-
-    pub fn short_day_name(&self, days_from_sunday: usize) -> String {
-        self.day_names[days_from_sunday].clone()
-    }
-
 }
 
 // ---- tests ----
