@@ -229,7 +229,7 @@ impl LibCLocaleFactory {
 }
 
 impl LocaleFactory for LibCLocaleFactory {
-    fn get_numeric(&mut self) -> Option<Box<Numeric>> {
+    fn get_numeric(&self) -> Option<Box<Numeric>> {
         return Some(
             Box::new(
                 Numeric::new(
@@ -237,7 +237,7 @@ impl LocaleFactory for LibCLocaleFactory {
                     &self.langinfo(langinfo::THOUSEP))));
     }
 
-    fn get_time(&mut self) -> Option<Box<Time>> {
+    fn get_time(&self) -> Option<Box<Time>> {
         return Some(
             Box::new(
                 Time {

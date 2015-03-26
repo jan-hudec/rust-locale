@@ -40,10 +40,10 @@ use num::traits::{Num, Float};
 /// another factory are possible. See `CompositeLocaleFactory`.
 pub trait LocaleFactory {
     /// Get implementation of the Numeric locale category.
-    fn get_numeric(&mut self) -> Option<Box<Numeric>> { None }
+    fn get_numeric(&self) -> Option<Box<Numeric>> { None }
 
     /// Get implementation of the Time locale category.
-    fn get_time(&mut self) -> Option<Box<Time>> { None }
+    fn get_time(&self) -> Option<Box<Time>> { None }
 }
 
 /// Auxiliary class for creating composing partial implementations of locale factories.
@@ -64,7 +64,7 @@ impl<F: LocaleFactory, S: LocaleFactory> CompositeLocaleFactory<F, S> {
 
 impl<F: LocaleFactory, S: LocaleFactory> LocaleFactory for CompositeLocaleFactory<F, S> {
     // XXX: Make a macro for this
-    fn get_numeric(&mut self) -> Option<Box<Numeric>> {
+    fn get_numeric(&self) -> Option<Box<Numeric>> {
         if let Some(v) = self.first.get_numeric() {
             Some(v)
         } else {
@@ -72,7 +72,7 @@ impl<F: LocaleFactory, S: LocaleFactory> LocaleFactory for CompositeLocaleFactor
         }
     }
 
-    fn get_time(&mut self) -> Option<Box<Time>> {
+    fn get_time(&self) -> Option<Box<Time>> {
         if let Some(v) = self.first.get_time() {
             Some(v)
         } else {
@@ -152,7 +152,7 @@ pub struct Numeric {
 
 impl Numeric {
     pub fn load_user_locale() -> Result<Numeric> {
-        if let Ok(mut factory) = SystemLocaleFactory::new("") {
+        if let Ok(factory) = SystemLocaleFactory::new("") {
             if let Some(numeric) = factory.get_numeric() {
                 return Ok(*numeric);
             }
@@ -202,7 +202,7 @@ pub struct Time {
 
 impl Time {
     pub fn load_user_locale() -> Result<Time> {
-        if let Ok(mut factory) = SystemLocaleFactory::new("") {
+        if let Ok(factory) = SystemLocaleFactory::new("") {
             if let Some(time) = factory.get_time() {
                 return Ok(*time);
             }

@@ -124,7 +124,7 @@ impl MacOSLocaleFactory {
 }
 
 impl LocaleFactory for MacOSLocaleFactory {
-    fn get_numeric(&mut self) -> Option<Box<Numeric>> {
+    fn get_numeric(&self) -> Option<Box<Numeric>> {
         if let Ok(numeric) = load_numeric(&self.locale) {
             Some(Box::new(numeric))
         } else {
@@ -132,7 +132,7 @@ impl LocaleFactory for MacOSLocaleFactory {
         }
     }
 
-    fn get_time(&mut self) -> Option<Box<Time>> {
+    fn get_time(&self) -> Option<Box<Time>> {
         if let Ok(time) = load_time(&self.locale) {
             Some(Box::new(time))
         } else {
