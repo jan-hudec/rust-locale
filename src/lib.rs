@@ -60,6 +60,11 @@ impl Locale {
     pub fn time(&self) -> &Time {
         &*self.time
     }
+
+    /// Construct message formatter for this locale.
+    pub fn fmt<'a>(&'a self, format: &'a str) -> fmt::MsgFmt<'a> {
+        fmt::MsgFmt::new(self, format)
+    }
 }
 
 impl Default for Locale {
@@ -157,6 +162,8 @@ impl LocaleFactory for InvariantLocaleFactory {
     // of the actual defaults.
 }
 
+// ---- system specific implementations ----
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
@@ -183,6 +190,10 @@ pub fn user_locale_factory() -> SystemLocaleFactory {
     // FIXME: Error handling? Constructing locale with "" should never fail as far as I can tell.
     SystemLocaleFactory::new("").unwrap()
 }
+// ---- formatting ----
+
+pub mod fmt; // The public formatting API and trait implementations
+mod fmtutil; // Helper string functions and type-specific formatting
 
 // ---- locale facets ----
 
