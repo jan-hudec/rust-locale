@@ -201,6 +201,9 @@ mod fmtutil; // Helper string functions and type-specific formatting
 // ---- numeric stuff ----
 
 /// Information on how to format numbers.
+/// 
+/// **Unstable:** This is likely to be changed to a trait in future. Only use via `fmt::MsgFmt` is
+/// stable.
 #[derive(Debug, Clone)]
 pub struct Numeric {
     /// The punctuation that separates the decimal part of a non-integer number. Usually a decimal
@@ -209,9 +212,21 @@ pub struct Numeric {
 
     /// The punctuation that separates groups of digits in long numbers.
     pub thousands_sep: String,
+
+    /// Decimal digits in appropriate script.
+    pub digits: [char; 10],
+
+    /// Group sizes.
+    ///
+    /// According to CLDR, there are at most two group sizes, so it is an array to avoid additional
+    /// allocation. Primary group is at index 0.
+    pub groups: [u8; 2],
 }
 
+static LATIN_DIGITS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+
 impl Numeric {
+    /// **Deprecated:** Obtain from `Locale` or use `SystemLocaleFactory`.
     pub fn load_user_locale() -> Result<Numeric> {
         if let Ok(factory) = SystemLocaleFactory::new("") {
             if let Some(numeric) = factory.get_numeric() {
@@ -221,14 +236,18 @@ impl Numeric {
         Ok(Numeric::english())
     }
 
+    /// **Deprecated:** English is not appropriate default. Use `InvariantLocaleFactory` to get a default instance.
     pub fn english() -> Numeric {
         Numeric::new(".", ",")
     }
 
+    /// **Deprecated:** Use appropriate LocaleFactory to get instance.
     pub fn new(decimal_sep: &str, thousands_sep: &str) -> Numeric {
         Numeric {
             decimal_sep: decimal_sep.to_string(),
             thousands_sep: thousands_sep.to_string(),
+            digits: LATIN_DIGITS,
+            groups: [3, 3],
         }
     }
 
@@ -252,8 +271,14 @@ impl Numeric {
 }
 
 impl Default for Numeric {
+    /// Default instance of locale facet corresponds to the *C* locale.
     fn default() -> Self {
-        Numeric::new(".", "")
+        Numeric {
+            decimal_sep: ".".to_owned(),
+            thousands_sep: "".to_owned(),
+            digits: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
+            groups: [0, 0],
+        }
     }
 }
 

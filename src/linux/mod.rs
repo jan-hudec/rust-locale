@@ -230,11 +230,36 @@ impl LibCLocaleFactory {
 
 impl LocaleFactory for LibCLocaleFactory {
     fn get_numeric(&self) -> Option<Box<Numeric>> {
+        let groups = self.langinfo(langinfo::__GROUPING);
         return Some(
             Box::new(
-                Numeric::new(
-                    &self.langinfo(langinfo::RADIXCHAR),
-                    &self.langinfo(langinfo::THOUSEP))));
+                Numeric {
+                    decimal_sep: self.langinfo(langinfo::RADIXCHAR).into_owned(),
+                    thousands_sep: self.langinfo(langinfo::THOUSEP).into_owned(),
+                    digits: [
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT0_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT1_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT2_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT3_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT4_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT5_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT6_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT7_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT8_WC),
+                        self.langinfo(langinfo::_NL_CTYPE_OUTDIGIT9_WC),
+                    ],
+                    groups: [
+                        // NOTE: langinfo gives -1 for unused groups
+                        if groups.len() >= 1 && groups[0] >= 0 { groups[0] as u8 } else { 0 },
+                        if groups.len() >= 2 {
+                            if groups[1] >= 0 { groups[1] as u8 } else { 0 }
+                        } else {
+                            if groups.len() >= 1 && groups[0] >= 0 { groups[0] as u8 } else { 0 }
+                        }
+                    ]
+                }
+            )
+        );
     }
 
     fn get_time(&self) -> Option<Box<Time>> {
