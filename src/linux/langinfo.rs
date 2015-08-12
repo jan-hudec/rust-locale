@@ -152,6 +152,7 @@ impl<'a> LanginfoItem<'a> for CTypeStringListItems {
 pub use self::CTypeStringListItems::*;
 
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)] // the code is not dead; any value can be used via cast to isize.
 enum MonetaryStringItems {
     INT_CURR_SYMBOL = ffi::__INT_CURR_SYMBOL as isize,
     CURRENCY_SYMBOL = ffi::__CURRENCY_SYMBOL as isize,
@@ -196,6 +197,7 @@ pub use self::NumericStringItems::__DECIMAL_POINT as RADIXCHAR;
 pub use self::NumericStringItems::__THOUSANDS_SEP as THOUSEP;
 
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)] // the code is not dead; any value can be used via cast to isize.
 enum TimeStringItems {
     ABDAY_1 = ffi::ABDAY_1 as isize,
     ABDAY_2 = ffi::ABDAY_2 as isize,
@@ -261,6 +263,7 @@ impl<'a> LanginfoItem<'a> for TimeStringItems {
 pub use self::TimeStringItems::*;
 
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)] // the code is not dead; any value can be used via cast to isize.
 enum TimeStringListItems {
     ERA = ffi::ERA as isize,
     ALT_DIGITS = ffi::ALT_DIGITS as isize,
@@ -278,6 +281,7 @@ impl<'a> LanginfoItem<'a> for TimeStringListItems {
 pub use self::TimeStringListItems::*;
 
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)] // the code is not dead; any value can be used via cast to isize.
 enum MessagesStringItems {
     YESEXPR = ffi::__YESEXPR as isize,
     NOEXPR = ffi::__NOEXPR as isize,
