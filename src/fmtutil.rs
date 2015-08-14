@@ -48,6 +48,78 @@ pub fn search_replace_to<Search, Replace> (format: &str,
     return res;
 }
 
+fn parse_char(s: &str) -> (Option<char>, &str) {
+    let mut chi = s.char_indices();
+    if let Some((_, c)) = chi.next() {
+        if let Some((i, _)) = chi.next() {
+            return (Some(c), &s[i..]);
+        } else {
+            return (Some(c), &s[s.len()..]);
+        }
+    } else {
+        return (None, s);
+    }
+}
+
+fn parse_flag(flag: char, s: &str) -> (bool, &str) {
+    if s.starts_with(flag) {
+        (true, parse_char(s).1)
+    } else {
+        (false, s)
+    }
+}
+
+fn parse_any<Pred: Fn(char) -> bool>(pred: Pred, s: &str) -> (Option<char>, &str) {
+    match parse_char(s) {
+        (Some(c), r) if pred(c) => { return (Some(c), r) },
+        _ => { return (None, s) },
+    }
+}
+
+fn parse_any_of<'a>(flags: &[char], s: &'a str) -> (Option<char>, &'a str) {
+    parse_any(|c| { flags.contains(&c) }, s)
+}
+
+fn parse_all<Pred: Fn(char) -> bool>(pred: Pred, s: &str) -> (&str, &str) {
+    let mut chi = s.char_indices();
+    loop {
+        if let Some((i, c)) = chi.next() {
+            if !pred(c) {
+                return (&s[..i], &s[i..]);
+            }
+        } else {
+            return (s, &s[s.len()..]);
+        }
+    }
+}
+
+fn parse_all_of<'a>(chars: &[char], s: &'a str) -> (&'a str, &'a str) {
+    parse_all(|c| { chars.contains(&c) }, s)
+}
+
+fn parse_all_not_of<'a>(chars: &[char], s: &'a str) -> (&'a str, &'a str) {
+    parse_all(|c| { !chars.contains(&c) }, s)
+}
+
+trait Shiftable<'a> {
+    fn shift<Res, Parse>(&mut self, parse: Parse) -> Res
+        where Parse: Fn(&'a str) -> (Res, &'a str);
+
+    fn shift_char(&mut self) -> Option<char> {
+        self.shift(parse_char)
+    }
+}
+
+impl<'a> Shiftable<'a> for &'a str {
+    fn shift<'b, Res, Parse>(&'b mut self, parse: Parse) -> Res
+        where Parse: Fn(&'a str) -> (Res, &'a str)
+    {
+        let (val, rest) = parse(*self);
+        *self = rest;
+        return val;
+    }
+}
+
 // ---- number formatting ----
 
 fn separator_count(digits: i32, numeric: &Numeric) -> i32 {
@@ -228,8 +300,32 @@ pub fn split_number_string<'a>(number: &'a str) -> (bool, Notation<'a>, &'a str)
 
 #[cfg(test)]
 mod test {
+    use super::Shiftable;
+    use super::{parse_char,parse_flag,parse_any,parse_all_of,parse_any_of,parse_all_not_of};
     use super::split_number_string;
     use super::super::Numeric;
+
+    // --- shift ---
+
+    #[test]
+    fn shifts() {
+        let mut s = "whatever";
+        assert_eq!(Some('w'), s.shift(parse_char));
+        assert_eq!(Some('h'), s.shift_char());
+        assert_eq!(false, s.shift(|s| { parse_flag('x', s) }));
+        assert_eq!(true, s.shift(|s| { parse_flag('a', s) }));
+        assert_eq!("", s.shift(|s| { parse_all_of(&['x', 'y', 'z'], s) }));
+        assert_eq!(Some('t'), s.shift(|s| { parse_any_of(&['t', 'u', 'v'], s) }));
+        assert_eq!(None, s.shift(|s| { parse_any_of(&[], s) }));
+        assert_eq!("eve", s.shift(|s| { parse_all_of(&['e', 'l', 'v', 'w'], s) }));
+        assert_eq!("r", s);
+        assert_eq!(("r", ""), parse_all_not_of(&['a', 'b', 'c'], s));
+        assert_eq!(Some('r'), s.shift(|s| { parse_any(|_| { true }, s) }));
+        assert_eq!(None, s.shift(|s| { parse_any(|_| { true }, s) }));
+        assert_eq!(None, s.shift(|s| { parse_any(|_| { true }, s) }));
+    }
+
+    // --- number formatting ---
 
     use std::fmt::{Display,Formatter,Result};
     use std::string::ToString;
