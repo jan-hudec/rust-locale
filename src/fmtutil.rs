@@ -101,6 +101,50 @@ fn parse_all_not_of<'a>(chars: &[char], s: &'a str) -> (&'a str, &'a str) {
     parse_all(|c| { !chars.contains(&c) }, s)
 }
 
+fn parse_unsigned<T: FromStr>(s: &str) -> (Option<T>, &str) {
+    let mut chi = s.char_indices();
+    let end;
+    loop {
+        match chi.next() {
+            Some((_, c)) if c.is_digit(10) => { },
+            Some((i, _)) => { end = i; break; },
+            None => { end = s.len(); break; },
+        }
+    }
+    if end == 0 {
+        return (None, &s);
+    }
+    if let Ok(res) = T::from_str(&s[..end]) {
+        return (Some(res), &s[end..]);
+    } else {
+        return (None, &s);
+    }
+}
+
+fn parse_int<T: FromStr>(mut s: &str) -> (Option<T>, &str) {
+    let mut chi = s.char_indices();
+    let end;
+    match chi.next() {
+        Some((_, '+')) => { s = &s[1..]; chi = s.char_indices(); },
+        Some((_, '-')) => { },
+        Some((_, c)) if c.is_digit(10) => { },
+        _ => { return (None, &s) },
+    }
+    loop {
+        match chi.next() {
+            Some((_, c)) if c.is_digit(10) => { },
+            Some((i, _)) => { end = i; break; },
+            None => { end = s.len(); break; },
+        }
+    }
+    assert!(end != 0);
+    if let Ok(res) = T::from_str(&s[..end]) {
+        return (Some(res), &s[end..]);
+    } else {
+        return (None, &s);
+    }
+}
+
 trait Shiftable<'a> {
     fn shift<Res, Parse>(&mut self, parse: Parse) -> Res
         where Parse: Fn(&'a str) -> (Res, &'a str);
@@ -302,6 +346,7 @@ pub fn split_number_string<'a>(number: &'a str) -> (bool, Notation<'a>, &'a str)
 mod test {
     use super::Shiftable;
     use super::{parse_char,parse_flag,parse_any,parse_all_of,parse_any_of,parse_all_not_of};
+    use super::{parse_unsigned,parse_int};
     use super::split_number_string;
     use super::super::Numeric;
 
@@ -323,6 +368,24 @@ mod test {
         assert_eq!(Some('r'), s.shift(|s| { parse_any(|_| { true }, s) }));
         assert_eq!(None, s.shift(|s| { parse_any(|_| { true }, s) }));
         assert_eq!(None, s.shift(|s| { parse_any(|_| { true }, s) }));
+    }
+
+    #[test]
+    fn shift_num() {
+        let mut s = "+2+3-5,211-6";
+        assert_eq!(None, s.shift(parse_unsigned::<u32>));
+        assert_eq!(Some(2), s.shift(parse_int));
+        assert_eq!(Some(3), s.shift(parse_int));
+        assert_eq!(None, s.shift(parse_unsigned::<usize>));
+        assert_eq!(Some(-5), s.shift(parse_int));
+        assert_eq!(None, s.shift(parse_int::<isize>));
+        assert_eq!(Some(','), s.shift_char());
+        assert_eq!(Some(211), s.shift(parse_int));
+        assert_eq!(Some('-'), s.shift_char());
+        assert_eq!(Some(6), s.shift(parse_int));
+        assert_eq!("", s);
+        assert_eq!(None, s.shift(parse_int::<isize>));
+        assert_eq!(None, s.shift(parse_unsigned::<usize>));
     }
 
     // --- number formatting ---
