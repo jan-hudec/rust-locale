@@ -10,5 +10,4 @@ readme = "README.md"
 version = "0.1.8"
 
 [dependencies]
-num = "*"
 libc = "0.1"
