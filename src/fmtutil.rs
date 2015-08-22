@@ -1,5 +1,6 @@
 use std::cmp::max;
-use std::fmt::{Formatter,Result};
+use std::default::Default;
+use std::fmt::{Error,Formatter,Result};
 use std::str::FromStr;
 use super::Numeric;
 
@@ -342,13 +343,127 @@ pub fn split_number_string<'a>(number: &'a str) -> (bool, Notation<'a>, &'a str)
             exp_s);
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Alignment { Left, Right, Internal, Centre, }
+
+fn parse_alignment(s: &str) -> ((Option<char>, Option<Alignment>), &str) {
+    fn alignment(f: Option<char>, s: &str) -> ((Option<char>, Option<Alignment>), &str) {
+        match parse_char(s) {
+            (Some('<'), t) => ((f, Some(Alignment::Left)), t),
+            (Some('>'), t) => ((f, Some(Alignment::Right)), t),
+            (Some('='), t) => ((f, Some(Alignment::Internal)), t),
+            (Some('^'), t) => ((f, Some(Alignment::Centre)), t),
+            _ => { ((None, None), s) },
+        }
+    }
+
+    if let (Some(f), t) = parse_char(s) {
+        match alignment(Some(f), t) {
+            ((_, Some(a)), u) => ((Some(f), Some(a)), u),
+            ((_, None), _) => alignment(None, s),
+        }
+    } else {
+        ((None, None), s)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Sign { Always, Negative, Pad, Never, }
+
+fn parse_sign(s: &str) -> (Option<Sign>, &str) {
+    match parse_char(s) {
+        (Some('+'), t) => (Some(Sign::Always), t),
+        (Some('-'), t) => (Some(Sign::Negative), t),
+        (Some(' '), t) => (Some(Sign::Pad), t),
+        (Some('|'), t) => (Some(Sign::Never), t),
+        _ => (None, s),
+    }
+}
+
+fn parse_precision(s: &str) -> (Option<(i32, i32)>, &str) {
+    if let (Some('.'), t) = parse_char(s) {
+        let zero = parse_flag('0', t).0;
+        if let (Some(prec), u) = parse_unsigned(t) {
+            if zero {
+                return (Some((0, prec)), u);
+            } else {
+                return (Some((prec, prec)), u);
+            }
+        }
+    }
+    return (None, s);
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct PythonyPattern {
+    pub fill: char,
+    pub alignment: Alignment,
+    pub sign: Sign,
+    pub minwidth: i32,
+    pub minprec: i32,
+    pub maxprec: i32,
+    pub fmt: char,
+}
+
+impl PythonyPattern {
+    // NOTE: Parts not specified in the format are not modified. This allows combining the formats.
+    // NOTE: The value may be modified even if error is returned. It is not expected to be used
+    // then anyway.
+    pub fn set(&mut self, mut fmt: &str) -> Result {
+        if let (of, Some(a)) = fmt.shift(parse_alignment) {
+            if let Some(f) = of { self.fill = f; }
+            self.alignment = a;
+        }
+        if let Some(s) = fmt.shift(parse_sign) {
+            self.sign = s;
+        }
+        if fmt.shift(|s| parse_flag('0', s)) {
+            self.fill = '0';
+            self.alignment = Alignment::Internal;
+        }
+        if let Some(w) = fmt.shift(parse_unsigned) {
+            self.minwidth = w;
+        }
+        if let Some((minp, maxp)) = fmt.shift(parse_precision) {
+            self.minprec = minp;
+            self.maxprec = maxp;
+        }
+        if let Some(f) = fmt.shift(parse_char) {
+            self.fmt = f;
+        }
+        if fmt.is_empty() {
+            Ok(())
+        } else {
+            Err(Error)
+        }
+    }
+}
+
+impl Default for PythonyPattern {
+    // NOTE: The default pattern won't work anywhere, because it has invalid format char!
+    fn default() -> Self {
+        PythonyPattern {
+            fill: ' ',
+            alignment: Alignment::Left,
+            sign: Sign::Negative,
+            minwidth: 0,
+            minprec: 0,
+            maxprec: 255,
+            fmt: '\0',
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::Shiftable;
     use super::{parse_char,parse_flag,parse_any,parse_all_of,parse_any_of,parse_all_not_of};
     use super::{parse_unsigned,parse_int};
     use super::split_number_string;
+    use super::{Alignment,Sign,parse_alignment,parse_sign,parse_precision,PythonyPattern};
     use super::super::Numeric;
+
+    use std::default::Default;
 
     // --- shift ---
 
@@ -436,5 +551,54 @@ mod test {
         assert_eq!("₁₁=₂₂=₆₈=₄₃₁/₂", Disp(|out| mag.format_to(1, 0, 0, true, &n, &n.digits, out)).to_string());
         assert_eq!(0, mag.exp);
         assert_eq!("", exp);
+    }
+
+    #[test]
+    fn pythony_pattern() {
+        assert_eq!(((None, None), ""), parse_alignment(""));
+        assert_eq!(((None, None), "xy"), parse_alignment("xy"));
+        assert_eq!(((None, Some(Alignment::Left)), "xy"), parse_alignment("<xy"));
+        assert_eq!(((None, Some(Alignment::Right)), "xy"), parse_alignment(">xy"));
+        assert_eq!(((None, Some(Alignment::Internal)), "xy"), parse_alignment("=xy"));
+        assert_eq!(((None, Some(Alignment::Centre)), "xy"), parse_alignment("^xy"));
+        assert_eq!(((Some('x'), Some(Alignment::Left)), "xy"), parse_alignment("x<xy"));
+        assert_eq!(((Some('x'), Some(Alignment::Right)), "xy"), parse_alignment("x>xy"));
+        assert_eq!(((Some('x'), Some(Alignment::Internal)), "xy"), parse_alignment("x=xy"));
+        assert_eq!(((Some('x'), Some(Alignment::Centre)), "xy"), parse_alignment("x^xy"));
+        assert_eq!(((Some('<'), Some(Alignment::Left)), "xy"), parse_alignment("<<xy"));
+        assert_eq!(((Some('>'), Some(Alignment::Right)), "xy"), parse_alignment(">>xy"));
+        assert_eq!(((Some('='), Some(Alignment::Internal)), "xy"), parse_alignment("==xy"));
+        assert_eq!(((Some('^'), Some(Alignment::Centre)), "xy"), parse_alignment("^^xy"));
+
+        assert_eq!((None, "02"), parse_sign("02"));
+        assert_eq!((Some(Sign::Always), "02"), parse_sign("+02"));
+        assert_eq!((Some(Sign::Negative), "02"), parse_sign("-02"));
+        assert_eq!((Some(Sign::Pad), "02"), parse_sign(" 02"));
+        assert_eq!((Some(Sign::Never), "02"), parse_sign("|02"));
+
+        assert_eq!((None, "02"), parse_precision("02"));
+        assert_eq!((None, "..02"), parse_precision("..02"));
+        assert_eq!((None, ".x"), parse_precision(".x"));
+        assert_eq!((Some((0, 2)), ""), parse_precision(".02"));
+        assert_eq!((Some((2, 2)), ""), parse_precision(".2"));
+        assert_eq!((Some((42, 42)), "+xy"), parse_precision(".42+xy"));
+
+        let mut p = PythonyPattern::default();
+        assert!(p.set("+2i").is_ok());
+        assert_eq!(PythonyPattern{
+            fill: ' ', alignment: Alignment::Left, sign: Sign::Always,
+            minwidth: 2, minprec: 0, maxprec: 255, fmt: 'i'}, p);
+        assert!(p.set("->5j").is_ok());
+        assert_eq!(PythonyPattern{
+            fill: '-', alignment: Alignment::Right, sign: Sign::Always,
+            minwidth: 5, minprec: 0, maxprec: 255, fmt: 'j'}, p);
+        assert!(p.set("0.02").is_ok());
+        assert_eq!(PythonyPattern{
+            fill: '0', alignment: Alignment::Internal, sign: Sign::Always,
+            minwidth: 5, minprec: 0, maxprec: 2, fmt: 'j'}, p);
+        assert!(p.set("xx").is_err());
+        assert_eq!(PythonyPattern{
+            fill: '0', alignment: Alignment::Internal, sign: Sign::Always,
+            minwidth: 5, minprec: 0, maxprec: 2, fmt: 'x'}, p);
     }
 }
