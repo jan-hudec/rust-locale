@@ -313,7 +313,7 @@ impl<'a> Notation<'a> {
 ///
 /// Tripple of
 ///  - negative
-///  - magnitude as mantissa split to integral and fractional part and value of exponent
+///  - notation as mantissa split to integral and fractional part and value of exponent
 ///  - exponent string (empty if not present)
 ///
 /// The fractional part has trailing zeroes removed. They will be added back by `Notation.format_to` to
@@ -346,6 +346,31 @@ pub fn split_number_string<'a>(number: &'a str) -> (bool, Notation<'a>, &'a str)
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Alignment { Left, Right, Internal, Centre, }
 
+impl Alignment {
+    pub fn before(self, pad: i32) -> i32 {
+        match self {
+            Alignment::Right => pad,
+            Alignment::Centre => (pad + 1)/2,
+            _ => 0,
+        }
+    }
+
+    pub fn internal(self, pad: i32) -> i32 {
+        match self {
+            Alignment::Internal => pad,
+            _ => 0,
+        }
+    }
+
+    pub fn after(self, pad: i32) -> i32 {
+        match self {
+            Alignment::Left => pad,
+            Alignment::Centre => pad/2,
+            _ => 0,
+        }
+    }
+}
+
 fn parse_alignment(s: &str) -> ((Option<char>, Option<Alignment>), &str) {
     fn alignment(f: Option<char>, s: &str) -> ((Option<char>, Option<Alignment>), &str) {
         match parse_char(s) {
@@ -369,6 +394,27 @@ fn parse_alignment(s: &str) -> ((Option<char>, Option<Alignment>), &str) {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Sign { Always, Negative, Pad, Never, }
+
+impl Sign {
+    pub fn width(self, negative: bool) -> i32 {
+        match self {
+            Sign::Always => 1,
+            Sign::Negative => if negative { 1 } else { 0 },
+            Sign::Pad => 1,
+            Sign::Never => 0,
+        }
+    }
+
+    // note: as far as I can tell there are no alternate plus and minus signs
+    pub fn get<'a>(self, negative: bool, plus: &'a str, minus: &'a str) -> &'a str {
+        match self {
+            Sign::Always => if negative { minus } else { plus },
+            Sign::Negative => if negative { minus } else { "" },
+            Sign::Pad => if negative { minus } else { "\u{a0}" }, // use non-breakable space
+            Sign::Never => "",
+        }
+    }
+}
 
 fn parse_sign(s: &str) -> (Option<Sign>, &str) {
     match parse_char(s) {
@@ -403,6 +449,9 @@ pub struct PythonyPattern {
     pub minprec: i32,
     pub maxprec: i32,
     pub fmt: char,
+    // following must be set by caller based on fmt:
+    pub use_sig: bool, // minprec&maxprec is significant digits, not fractional digits
+    pub use_sep: bool,
 }
 
 impl PythonyPattern {
@@ -437,6 +486,57 @@ impl PythonyPattern {
             Err(Error)
         }
     }
+
+    fn pad_to(&self, n: i32, fill: char, out: &mut Formatter) -> Result {
+        for _ in 0..n { try!(out.write_fmt(format_args!("{}", fill))) }
+        return Ok(());
+    }
+
+    pub fn before_to(&self, n: i32, fill: char, out: &mut Formatter) -> Result {
+        self.pad_to(self.alignment.before(n), fill, out)
+    }
+
+    pub fn internal_to(&self, n: i32, fill: char, out: &mut Formatter) -> Result {
+        self.pad_to(self.alignment.internal(n), fill, out)
+    }
+
+    pub fn after_to(&self, n: i32, fill: char, out: &mut Formatter) -> Result {
+        self.pad_to(self.alignment.after(n), fill, out)
+    }
+
+    pub fn min_frac(&self) -> i32 {
+        if self.use_sig { 0 } else { self.minprec }
+    }
+
+    pub fn min_sig(&self) -> i32 {
+        if self.use_sig { self.minprec } else { 0 }
+    }
+
+    pub fn width(&self, negative: bool, notation: &Notation, numeric: &Numeric) -> i32 {
+        let width =
+            self.sign.width(negative) +
+            notation.width(1, self.min_frac(), self.min_sig(), self.use_sep, numeric);
+        return max(width, self.minwidth);
+    }
+
+    pub fn format_to(&self, negative: bool, notation: &Notation, numeric: &Numeric,
+                     digits: &[char; 10], plus: &str, minus: &str, out: &mut Formatter)
+        -> Result {
+        let width =
+            self.sign.width(negative) +
+            notation.width(1, self.min_frac(), self.min_sig(), self.use_sep, numeric);
+        let padding = max(self.minwidth - width, 0);
+        // '0' is magic
+        // FIXME: '0' should be magic even more; it should be also getting separators
+        let fill = if self.fill == '0' { digits[0] } else { self.fill };
+
+        try!(self.before_to(padding, fill, out));
+        try!(out.write_str(self.sign.get(negative, plus, minus)));
+        try!(self.internal_to(padding, fill, out));
+        try!(notation.format_to(1, self.min_frac(), self.min_sig(),
+                                 self.use_sep, numeric, digits, out));
+        return self.after_to(padding, fill, out);
+    }
 }
 
 impl Default for PythonyPattern {
@@ -450,6 +550,8 @@ impl Default for PythonyPattern {
             minprec: 0,
             maxprec: 255,
             fmt: '\0',
+            use_sig: false,
+            use_sep: true,
         }
     }
 }
@@ -587,18 +689,40 @@ mod test {
         assert!(p.set("+2i").is_ok());
         assert_eq!(PythonyPattern{
             fill: ' ', alignment: Alignment::Left, sign: Sign::Always,
-            minwidth: 2, minprec: 0, maxprec: 255, fmt: 'i'}, p);
+            minwidth: 2, minprec: 0, maxprec: 255, fmt: 'i',
+            use_sig: false, use_sep: true}, p);
         assert!(p.set("->5j").is_ok());
         assert_eq!(PythonyPattern{
             fill: '-', alignment: Alignment::Right, sign: Sign::Always,
-            minwidth: 5, minprec: 0, maxprec: 255, fmt: 'j'}, p);
+            minwidth: 5, minprec: 0, maxprec: 255, fmt: 'j',
+            use_sig: false, use_sep: true}, p);
         assert!(p.set("0.02").is_ok());
         assert_eq!(PythonyPattern{
             fill: '0', alignment: Alignment::Internal, sign: Sign::Always,
-            minwidth: 5, minprec: 0, maxprec: 2, fmt: 'j'}, p);
+            minwidth: 5, minprec: 0, maxprec: 2, fmt: 'j',
+            use_sig: false, use_sep: true}, p);
         assert!(p.set("xx").is_err());
         assert_eq!(PythonyPattern{
             fill: '0', alignment: Alignment::Internal, sign: Sign::Always,
-            minwidth: 5, minprec: 0, maxprec: 2, fmt: 'x'}, p);
+            minwidth: 5, minprec: 0, maxprec: 2, fmt: 'x',
+            use_sig: false, use_sep: true}, p);
+    }
+
+    #[test]
+    fn pythony_pattern_format() {
+        let (sign, mag, _) = split_number_string("2.110e1");
+        let n = numeric();
+        let mut p = PythonyPattern::default();
+
+        assert_eq!(4, p.width(sign, &mag, &n));
+        assert_eq!("₂₁/₁",
+                   Disp(|out| p.format_to(sign, &mag, &n, &n.digits, "⁺", "¯", out)).to_string());
+
+        assert!(p.set("+08").is_ok());
+        assert_eq!(8, p.width(sign, &mag, &n));
+        // FIXME Do we want this? Shouldn't it still be grouped? Or else, do we really want to
+        // support it? NOTE: Python has 0 even more magic and inserts separators for it.
+        assert_eq!("⁺₀₀₀₂₁/₁",
+                   Disp(|out| p.format_to(sign, &mag, &n, &n.digits, "⁺", "¯", out)).to_string());
     }
 }
