@@ -16,8 +16,9 @@
 
 extern crate libc;
 
+use std::cmp::max;
 use std::default::Default;
-use std::fmt::Display;
+use std::fmt::{Display,LowerExp};
 use std::io::Result;
 
 /// Describes locale conventions.
@@ -199,9 +200,79 @@ mod fmtutil; // Helper string functions and type-specific formatting
 // ---- numeric stuff ----
 
 /// Information on how to format numbers.
-/// 
+///
 /// **Unstable:** This is likely to be changed to a trait in future. Only use via `fmt::MsgFmt` is
 /// stable.
+///
+/// # Format specifications
+///
+/// The general form of format specifier is:
+///
+/// ```ebnf
+/// format_spec ::= [[fill]align][sign]["0"][width][.["0"]precision][type]
+/// fill        ::= <any character>
+/// align       ::= "<" | ">" | "=" | "^"
+/// sign        ::= "+" | "-" | " " | "|"
+/// width       ::= integer
+/// precision   ::= integer
+/// type        ::= depends on argument type
+/// ```
+///
+/// The fill and alignment options are:
+///
+///  - `<`: Align to the logical left.
+///  - `>`: Align to the logical right.
+///  - `=`: Insert padding between sign and magnitude.
+///  - `^`: Centre the field with bias to the logical right.
+///
+/// The sign options are:
+///
+///  - `+`: Print `+` for positive and `-` for negative numbers.
+///  - `-`: Print nothing for positive and `-` for negative numbers.
+///  - space: Print non-breakable space for positive and `-` for negative numbers.
+///  - `|`: Do not print sign at all (intended mainly as helper for formatting more complex types).
+///
+/// If the _width_ starts with `0`, _fill_ is set to `0`.
+///
+/// _width_ is positive integer defining _minimum_ width of the field. The field will never be
+/// truncated.
+///
+/// The _precision_ specifies number of digits after decimal point for `f` format and number of
+/// significant digits for the other floating-point formats. It has no effect for integers.
+///
+/// If the _precision_ starts with `0`, trailing zeroes _after_ decimal point will be _truncated_.
+///
+/// ## Integer format types
+///
+///  - `n`: The default format according to current locale. Can be omitted.
+///  - `c`: Use locale digits, but don't insert group separators.
+///  - `C`: Not localized. Use latin digits and don't insert group separators.
+///
+/// ## Floating-point number format types
+///
+///  - `e`: Engineering exponential format. _precision_ indicates the number of significant digits.
+///    Short exponent separator will be used which is `E` in most locales.
+///  - `E`: Common exponential format. _precision_ indicates the number of significant digits. Long
+///    exponent separator will be used which is usually `×10` and in locales using the latin digits
+///    the superscript digits will be used to render the exponent.
+///  - `f`: Fixed point representation. _precision_ indicates number of digits after decimal point.
+///  - `g`: General representation. _precision_ indicates number of significant digits. Unlike C,
+///    the format will _not_ switch to exponential representation for too small or too large
+///    numbers.
+///  - `h`: General representation with exponential fallback. This will switch to engineering
+///    exponential format if insignifiant zeroes would be otherwise needed, that is when the number
+///    of digits before decimal point would be larger than number of significant digits or if the
+///    first significant digit is lower order than tenths.
+///  - `H`: General representation with exponential fallback. Like `h`, but will fall back to
+///    common exponential format like `E`.
+///  - `m`: Mantissa. Just the mantissa part of the exponential format. For when something needs to
+///    be inserted between mantissa and exponent.
+///  - `x`: Exponent. Just the exponent part of the exponential format. For when something needs to
+///    be inserted between mantissa and exponent.
+///  - `X`: Exponent, but in locales with latin digits it will be in superscript.
+///
+/// ## Examples
+// FIXME FIXME FIXME DOCTESTS!
 #[derive(Debug, Clone)]
 pub struct Numeric {
     /// The punctuation that separates the decimal part of a non-integer number. Usually a decimal
@@ -222,8 +293,141 @@ pub struct Numeric {
 }
 
 static LATIN_DIGITS: [char; 10] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+static SUPERSCRIPT_DIGITS: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
 
 impl Numeric {
+    /// Format integral number.
+    ///
+    /// Ouput should be written to a fomratter. Note, that padding should be used as specified in
+    /// `fmt1` or `fmt2`, not as given in `out`.
+    ///
+    /// # Parameters
+    ///  - `n`: The number to format.
+    ///  - `fmt1`: First format specification, with higher precedence.
+    ///  - `fmt2`: Second format specification, with lower precedence.
+    ///  - `out`: Output sink. Don't use the padding defined on it, pad according to `fmt`.
+    pub fn format_int_to<I: Display>(&self, n: &I, fmt1: &str, fmt2: &str, out: &mut ::std::fmt::Formatter)
+        -> ::std::fmt::Result
+    {
+        let mut fmt = fmtutil::PythonyPattern::default();
+        fmt.fmt = 'n';
+        try!(fmt.set(fmt2));
+        try!(fmt.set(fmt1));
+        fmt.minprec = 0; // do not want precision for integers!
+        let digits = match fmt.fmt {
+            'n' => &self.digits,
+            'c' => { fmt.use_sep = false; &self.digits },
+            'C' => { fmt.use_sep = false; &LATIN_DIGITS },
+            _ => return Err(::std::fmt::Error),
+        };
+        let numstr = n.to_string(); // default Display; no options needed for it
+        let (neg, not, exp) = fmtutil::split_number_string(&numstr);
+        if exp != "" || not.exp != 0 { return Err(::std::fmt::Error); }
+
+        return fmt.format_to(neg, &not, &self, digits, "+", "-", out);
+    }
+
+    /// Format floating-point number.
+    ///
+    /// Ouput should be written to a fomratter. Note, that padding should be used as specified in
+    /// `fmt1` or `fmt2`, not as given in `out`.
+    ///
+    /// # Parameters
+    ///  - `n`: The number to format.
+    ///  - `fmt1`: First format specification, with higher precedence.
+    ///  - `fmt2`: Second format specification, with lower precedence.
+    ///  - `out`: Output sink. Don't use the padding defined on it, pad according to `fmt`.
+    pub fn format_float_to<I: Display + LowerExp>(&self, n: &I, fmt1: &str, fmt2: &str, out: &mut ::std::fmt::Formatter)
+        -> ::std::fmt::Result
+    {
+        let mut fmt = fmtutil::PythonyPattern::default();
+        try!(fmt.set(".06h"));
+        try!(fmt.set(fmt2));
+        try!(fmt.set(fmt1));
+        let mut efmt = fmtutil::PythonyPattern::default();
+        efmt.sign = fmtutil::Sign::Always;
+
+        let numstr = match fmt.fmt {
+            // number of decimal digits => use Display
+            'f' => format!("{:.*}", fmt.maxprec as usize, *n),
+            // number of significant digits => use LowerExp
+            _ => { fmt.use_sig = true; format!("{:.*e}", fmt.maxprec as usize, *n) },
+        };
+        let (neg, mut not, exp) = fmtutil::split_number_string(&numstr);
+
+        // Decide whether exponential format will be used and adjust not if yes:
+        let use_exp = match fmt.fmt {
+            'e'|'E' => true,
+            'f'|'g' => false,
+            'h'|'H' => not.exp > fmt.maxprec as i32 || not.exp < -1,
+            'm' => { not.exp = 0; false } // mutate not as if exponent, but otherwise don't use it
+            'x'|'X' => {
+                try!(efmt.set(fmt2));
+                try!(efmt.set(fmt1));
+                efmt.minprec = 0; // exponent does not have fractional part
+
+                let (eneg, enot, eexp) = fmtutil::split_number_string(exp);
+                if eexp != "" || enot.exp != 0 { return Err(::std::fmt::Error); }
+
+                if fmt.fmt == 'X' && self.digits[0] == '0' {
+                    return efmt.format_to(eneg, &enot, &self, &SUPERSCRIPT_DIGITS, "⁺", "¯", out);
+                } else {
+                    return efmt.format_to(eneg, &enot, &self, &self.digits, "+", "-", out);
+                };
+            },
+            _ => return Err(::std::fmt::Error),
+        };
+        if use_exp {
+            not.exp = 0; // see Notation.format_to doc
+            assert!(!exp.is_empty()); // fmt.fmt is not 'f', so we should have used LowerExp
+        };
+        let width =
+            fmt.sign.width(neg) +
+            not.width(1, fmt.min_frac(), fmt.min_sig(), fmt.use_sep, &self);
+            if use_exp {
+                1 + // FIXME FIXME: long exponent prefix
+                exp.len() +
+                if exp.starts_with('-') { 0 } else { 1 } // exponent sign
+            } else { 0 };
+        let padding = max(fmt.minwidth - width, 0);
+        // FIXME FIXME: repeating myself from PythonyPattern.format_to; the magic does not work,
+        // too
+        let fill = if fmt.fill == '0' { self.digits[0] } else { fmt.fill };
+
+        //try!(fmt.format_to(neg, not, &self, &self.digits, "+", "-", out));
+        try!(fmt.before_to(padding, fill, out));
+        try!(out.write_str(fmt.sign.get(neg, "+", "-")));
+        try!(fmt.internal_to(padding, fill, out));
+        try!(not.format_to(1, fmt.min_frac(), fmt.min_sig(),
+                           fmt.use_sep, &self, &self.digits, out));
+
+        if use_exp {
+            try!(out.write_str("e")); // FIXME FIXME: long exponent prefix
+            let (eneg, enot, eexp) = fmtutil::split_number_string(exp);
+            if eexp != "" || enot.exp != 0 { return Err(::std::fmt::Error); }
+
+            if (fmt.fmt == 'E' || fmt.fmt == 'H') && self.digits[0] == '0' {
+                return efmt.format_to(eneg, &enot, &self, &SUPERSCRIPT_DIGITS, "⁺", "¯", out);
+            } else {
+                return efmt.format_to(eneg, &enot, &self, &self.digits, "+", "-", out);
+            };
+        };
+
+        return fmt.after_to(padding, fill, out);
+    }
+    /// Format integral number.
+    ///
+    /// Ouput should be written to a fomratter. Note, that padding should be used as specified in
+    /// `fmt`, not as given in `out`.
+    ///
+    /// # Parameters
+    ///  - `n`: The number to format.
+    ///  - `fmt`: Format specification. Implementations _should_ understand at least python-style
+    ///     specifications and CLDR patterns.
+    ///  - `out`: Output sink. Don't use the padding defined on it, pad according to `fmt`.
+    ///
+    ///  # Supported format specifications
+    ///
     /// **Deprecated:** Obtain from `Locale` or use `SystemLocaleFactory`.
     pub fn load_user_locale() -> Result<Numeric> {
         if let Ok(factory) = SystemLocaleFactory::new("") {
